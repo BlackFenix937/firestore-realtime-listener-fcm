@@ -1,6 +1,5 @@
 const admin = require("firebase-admin");
 const express = require("express");
-const axios = require('axios');  // Para pruebas de conectividad si fuera necesario
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -104,14 +103,6 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
           console.error("❌ Error de red al enviar notificación:", error);
         } else {
           console.error("❌ Error desconocido al enviar FCM:", error);
-        }
-
-        // Opcionalmente, probar con axios para verificar si hay problemas de red
-        try {
-          const testConnection = await axios.get('https://www.google.com');
-          console.log("✅ Conexión a la red funciona.");
-        } catch (testError) {
-          console.error("❌ Error de red al probar conexión externa:", testError);
         }
       }
     }
