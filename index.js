@@ -4,10 +4,8 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Cargar las credenciales de Firebase desde una variable de entorno
 const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
-// Inicializar Firebase Admin SDK
 admin.initializeApp({
   credential: admin.credential.cert(credentials),
 });
@@ -15,7 +13,16 @@ admin.initializeApp({
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-// Función para calcular amonio estimado
+// --- Servidor Express simple ---
+app.get("/", (req, res) => {
+  res.send("Listener is running");
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+// --- Función para calcular amonio ---
 function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, turbidez) {
   let amonio = 0.01;
 
@@ -28,39 +35,17 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
   return Math.min(Math.max(amonio, 0.0), 1.0);
 }
 
-// Función para enviar notificaciones a los usuarios
-async function sendNotification(tokens, payload) {
-  let retries = 3;
-  let success = false;
-
-  // Intentar enviar las notificaciones hasta 3 veces si ocurre un timeout o error de red
-  while (retries > 0 && !success) {
-    try {
-      const response = await messaging.sendEachForMulticast({
-        tokens,
-        notification: payload.notification,
-        data: payload.data,
-      });
-      console.log(`📩 Notificaciones enviadas: ${response.successCount}/${tokens.length}`);
-      success = true;
-    } catch (error) {
-      console.error(`❌ Error al enviar FCM (intento ${4 - retries}):`, error);
-      retries--;
-      if (retries > 0) {
-        console.log("⏳ Reintentando...");
-        await new Promise(res => setTimeout(res, 3000)); // Esperar 3 segundos antes de reintentar
-      }
-    }
-  }
-
-  if (!success) {
-    console.error("⚠️ No se pudieron enviar las notificaciones después de varios intentos.");
+// --- Función para enviar notificación individualmente ---
+async function enviarNotificacion(token, payload) {
+  try {
+    const response = await messaging.sendToDevice(token, payload);
+    console.log(`📩 Notificación enviada a ${token}: ${response.successCount} éxito(s), ${response.failureCount} fallo(s)`);
+  } catch (error) {
+    console.error(`❌ Error al enviar FCM al token ${token}: ${error.message}`);
   }
 }
 
 // --- Listener para Firestore ---
-
-// Escuchar cambios en la colección 'lecturas_sensores'
 db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
   snapshot.docChanges().forEach(async (change) => {
     if (change.type === "added") {
@@ -90,7 +75,6 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
         return;
       }
 
-      // Obtener todos los tokens de los usuarios
       const usersSnap = await db.collection("users").get();
       const tokens = usersSnap.docs
         .map(doc => doc.data().fcmToken)
@@ -101,7 +85,6 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
         return;
       }
 
-      // Crear el payload de la notificación
       const payload = {
         notification: {
           title: `⚠️ Alerta en ${estanqueId}`,
@@ -118,17 +101,10 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
         }
       };
 
-      // Enviar la notificación
-      await sendNotification(tokens, payload);
+      // Enviar una notificación a cada token individualmente
+      for (let token of tokens) {
+        await enviarNotificacion(token, payload);
+      }
     }
   });
-});
-
-// --- Servidor Express ---
-app.get("/", (req, res) => {
-  res.send("Listener is running");
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
