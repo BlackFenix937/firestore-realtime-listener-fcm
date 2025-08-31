@@ -58,70 +58,96 @@ async function sendNotification(tokens, payload) {
   }
 }
 
+// Función para generar el payload de la notificación
+function createPayload(estanqueId, oxigeno, ph, temperatura, solidos_disueltos, turbidez, amonio, alertas) {
+  return {
+    notification: {
+      title: `⚠️ Alerta en ${estanqueId}`,
+      body: alertas.join(" | "),
+    },
+    data: {
+      estanqueId: estanqueId,
+      oxigeno: oxigeno.toString(),
+      ph: ph.toString(),
+      temperatura: temperatura.toString(),
+      solidos_disueltos: solidos_disueltos.toString(),
+      turbidez: turbidez.toString(),
+      amonio: amonio.toFixed(3),
+    }
+  };
+}
+
 // --- Listener para Firestore ---
 
-// Escuchar cambios en la colección 'lecturas_sensores'
-db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
-  snapshot.docChanges().forEach(async (change) => {
-    if (change.type === "added") {
-      const data = change.doc.data();
-      if (!data) return;
+// Función para obtener los tokens de los usuarios
+async function getTokens() {
+  const usersSnap = await db.collection("users").get();
+  return usersSnap.docs
+    .map(doc => doc.data().fcmToken)
+    .filter(token => !!token);
+}
 
-      const { valores_sensores, estanqueId } = data;
+// Función para procesar los valores de sensores
+async function processSensorData(change) {
+  const data = change.doc.data();
+  if (!data) return;
 
-      const oxigeno = valores_sensores.oxigeno ?? 0;
-      const ph = valores_sensores.ph ?? 0;
-      const solidos_disueltos = valores_sensores.solidos_disueltos ?? 0;
-      const temperatura = valores_sensores.temperatura ?? 0;
-      const turbidez = valores_sensores.turbidez ?? 0;
+  const { valores_sensores, estanqueId } = data;
 
-      const amonio = calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, turbidez);
+  const oxigeno = valores_sensores.oxigeno ?? 0;
+  const ph = valores_sensores.ph ?? 0;
+  const solidos_disueltos = valores_sensores.solidos_disueltos ?? 0;
+  const temperatura = valores_sensores.temperatura ?? 0;
+  const turbidez = valores_sensores.turbidez ?? 0;
 
-      let alertas = [];
-      if (oxigeno < 5 || oxigeno > 8) alertas.push(`Oxígeno fuera de rango: ${oxigeno} mg/L`);
-      if (ph < 6.5 || ph > 7.5) alertas.push(`pH fuera de rango: ${ph}`);
-      if (temperatura < 20 || temperatura > 25) alertas.push(`Temperatura fuera de rango: ${temperatura} °C`);
-      if (solidos_disueltos > 400) alertas.push(`Sólidos disueltos muy altos: ${solidos_disueltos} ppm`);
-      if (turbidez > 400) alertas.push(`Turbidez muy alta: ${turbidez} NTU`);
-      if (amonio > 0.02) alertas.push(`Amonio elevado: ${amonio.toFixed(3)} mg/L`);
+  const amonio = calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, turbidez);
 
-      if (alertas.length === 0) {
-        console.log("✅ Valores dentro de rango, no se envía alerta.");
-        return;
-      }
+  let alertas = [];
+  if (oxigeno < 5 || oxigeno > 8) alertas.push(`Oxígeno fuera de rango: ${oxigeno} mg/L`);
+  if (ph < 6.5 || ph > 7.5) alertas.push(`pH fuera de rango: ${ph}`);
+  if (temperatura < 20 || temperatura > 25) alertas.push(`Temperatura fuera de rango: ${temperatura} °C`);
+  if (solidos_disueltos > 400) alertas.push(`Sólidos disueltos muy altos: ${solidos_disueltos} ppm`);
+  if (turbidez > 400) alertas.push(`Turbidez muy alta: ${turbidez} NTU`);
+  if (amonio > 0.02) alertas.push(`Amonio elevado: ${amonio.toFixed(3)} mg/L`);
 
-      // Obtener todos los tokens de los usuarios
-      const usersSnap = await db.collection("users").get();
-      const tokens = usersSnap.docs
-        .map(doc => doc.data().fcmToken)
-        .filter(token => !!token);
+  if (alertas.length === 0) {
+    console.log("✅ Valores dentro de rango, no se envía alerta.");
+    return;
+  }
 
-      if (tokens.length === 0) {
-        console.log("⚠️ No hay tokens registrados para enviar notificaciones.");
-        return;
-      }
+  const tokens = await getTokens();
+  if (tokens.length === 0) {
+    console.log("⚠️ No hay tokens registrados para enviar notificaciones.");
+    return;
+  }
 
-      // Crear el payload de la notificación
-      const payload = {
-        notification: {
-          title: `⚠️ Alerta en ${estanqueId}`,
-          body: alertas.join(" | "),
-        },
-        data: {
-          estanqueId: estanqueId,
-          oxigeno: oxigeno.toString(),
-          ph: ph.toString(),
-          temperatura: temperatura.toString(),
-          solidos_disueltos: solidos_disueltos.toString(),
-          turbidez: turbidez.toString(),
-          amonio: amonio.toFixed(3),
-        }
-      };
+  const payload = createPayload(estanqueId, oxigeno, ph, temperatura, solidos_disueltos, turbidez, amonio, alertas);
 
-      // Enviar la notificación
-      await sendNotification(tokens, payload);
+  // Enviar la notificación
+  await sendNotification(tokens, payload);
+}
+
+// --- Listener Firestore para cambios en 'lecturas_sensores' ---
+db.collection("lecturas_sensores").onSnapshot(snapshot => {
+  snapshot.docChanges().forEach(change => {
+    if (change.type === "added" || change.type === "modified") {
+      processSensorData(change);
     }
   });
+});
+
+// --- Notificaciones iniciales al inicio del servicio ---
+
+async function sendInitialNotifications() {
+  const snapshot = await db.collection("lecturas_sensores").get();
+  snapshot.forEach(doc => {
+    processSensorData({ doc });
+  });
+}
+
+// Llamar a sendInitialNotifications cuando el servidor se inicie
+sendInitialNotifications().catch(err => {
+  console.error("Error al enviar notificaciones iniciales:", err);
 });
 
 // --- Servidor Express ---
