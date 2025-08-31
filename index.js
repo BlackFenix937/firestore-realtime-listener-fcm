@@ -35,6 +35,24 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
   return Math.min(Math.max(amonio, 0.0), 1.0);
 }
 
+// --- Función para enviar notificaciones en lotes ---
+const batchSize = 500; // Número de tokens por lote
+
+async function enviarNotificacionesEnLotes(tokens, payload) {
+  for (let i = 0; i < tokens.length; i += batchSize) {
+    const batchTokens = tokens.slice(i, i + batchSize);
+    try {
+      const response = await messaging.sendEachForMulticast({
+        tokens: batchTokens,
+        ...payload,
+      });
+      console.log(`📩 Lote de notificaciones enviadas: ${response.successCount}/${batchTokens.length}`);
+    } catch (error) {
+      console.error("❌ Error al enviar FCM:", error);
+    }
+  }
+}
+
 // --- Listener para Firestore ---
 db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
   snapshot.docChanges().forEach(async (change) => {
@@ -92,22 +110,10 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
       };
 
       try {
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Tiempo de espera agotado para FCM")), 10000)); // 10 segundos
-        const sendNotification = messaging.sendEachForMulticast({
-          tokens,
-          ...payload
-        });
-
-        // Usa Promise.race para lanzar ambas promesas
-        await Promise.race([sendNotification, timeout]);
-        
-        console.log(`📩 Notificaciones enviadas`);
+        // Intentar enviar las notificaciones en lotes
+        await enviarNotificacionesEnLotes(tokens, payload);
       } catch (error) {
-        if (error.message === "Tiempo de espera agotado para FCM") {
-          console.error("❌ Timeout alcanzado al intentar enviar las notificaciones.");
-        } else {
-          console.error("❌ Error desconocido al enviar FCM:", error);
-        }
+        console.error("❌ Timeout alcanzado al intentar enviar las notificaciones.", error);
       }
     }
   });
