@@ -1,6 +1,5 @@
 const admin = require("firebase-admin");
 const express = require("express");
-const axios = require("axios");  // Asegúrate de instalar axios
 
 const app = express();
 const PORT = process.env.PORT || 8080;
