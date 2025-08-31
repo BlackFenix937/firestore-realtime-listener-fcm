@@ -92,15 +92,19 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
       };
 
       try {
-        // Ajuste de tiempo de espera en la conexión de Firebase
-        const response = await messaging.sendEachForMulticast({
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Tiempo de espera agotado para FCM")), 10000)); // 10 segundos
+        const sendNotification = messaging.sendEachForMulticast({
           tokens,
-          ...payload,
-        }).timeout(10000);  // Timeout ajustado a 10 segundos
-        console.log(`📩 Notificaciones enviadas: ${response.successCount}/${tokens.length}`);
+          ...payload
+        });
+
+        // Usa Promise.race para lanzar ambas promesas
+        await Promise.race([sendNotification, timeout]);
+        
+        console.log(`📩 Notificaciones enviadas`);
       } catch (error) {
-        if (error.code === 'messaging/app/network-error') {
-          console.error("❌ Error de red al enviar notificación:", error);
+        if (error.message === "Tiempo de espera agotado para FCM") {
+          console.error("❌ Timeout alcanzado al intentar enviar las notificaciones.");
         } else {
           console.error("❌ Error desconocido al enviar FCM:", error);
         }
