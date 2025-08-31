@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const express = require("express");
+const axios = require('axios');  // Para pruebas de conectividad si fuera necesario
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -36,10 +37,6 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
 }
 
 // --- Listener para Firestore ---
-
-// Esto no es una Cloud Function, así que debes usar el SDK para escuchar cambios
-// Aquí un ejemplo básico usando snapshot listeners:
-
 db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
   snapshot.docChanges().forEach(async (change) => {
     if (change.type === "added") {
@@ -96,13 +93,26 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
       };
 
       try {
+        // Ajuste de tiempo de espera en la conexión de Firebase
         const response = await messaging.sendEachForMulticast({
           tokens,
-          ...payload
-        });
+          ...payload,
+        }).timeout(10000);  // Timeout ajustado a 10 segundos
         console.log(`📩 Notificaciones enviadas: ${response.successCount}/${tokens.length}`);
       } catch (error) {
-        console.error("❌ Error al enviar FCM:", error);
+        if (error.code === 'messaging/app/network-error') {
+          console.error("❌ Error de red al enviar notificación:", error);
+        } else {
+          console.error("❌ Error desconocido al enviar FCM:", error);
+        }
+
+        // Opcionalmente, probar con axios para verificar si hay problemas de red
+        try {
+          const testConnection = await axios.get('https://www.google.com');
+          console.log("✅ Conexión a la red funciona.");
+        } catch (testError) {
+          console.error("❌ Error de red al probar conexión externa:", testError);
+        }
       }
     }
   });
