@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const express = require("express");
+const axios = require("axios");  // Asegúrate de instalar axios
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -41,14 +42,26 @@ const batchSize = 500; // Número de tokens por lote
 async function enviarNotificacionesEnLotes(tokens, payload) {
   for (let i = 0; i < tokens.length; i += batchSize) {
     const batchTokens = tokens.slice(i, i + batchSize);
-    try {
-      const response = await messaging.sendEachForMulticast({
-        tokens: batchTokens,
-        ...payload,
-      });
-      console.log(`📩 Lote de notificaciones enviadas: ${response.successCount}/${batchTokens.length}`);
-    } catch (error) {
-      console.error("❌ Error al enviar FCM:", error);
+    let attempts = 0;
+    let success = false;
+
+    while (attempts < 3 && !success) { // Reintentos (hasta 3 veces)
+      try {
+        const response = await messaging.sendEachForMulticast({
+          tokens: batchTokens,
+          ...payload,
+        });
+        console.log(`📩 Lote de notificaciones enviadas: ${response.successCount}/${batchTokens.length}`);
+        success = true;
+      } catch (error) {
+        attempts++;
+        console.error(`❌ Error al enviar FCM (intento ${attempts}): ${error.message}`);
+        if (attempts === 3) {
+          console.error("⚠️ Se alcanzó el número máximo de intentos para este lote.");
+        }
+        // Esperar 2 segundos antes de intentar nuevamente
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
   }
 }
