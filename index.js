@@ -34,12 +34,18 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
 
   return Math.min(Math.max(amonio, 0.0), 1.0);
 }
- 
+
 // --- Función para enviar notificación individualmente ---
 async function enviarNotificacion(token, payload) {
   try {
-    const response = await messaging.sendToDevice(token, payload);
-    console.log(`📩 Notificación enviada a ${token}: ${response.successCount} éxito(s), ${response.failureCount} fallo(s)`);
+    const message = {
+      token: token,
+      notification: payload.notification,
+      data: payload.data,
+    };
+
+    const response = await messaging.send(message);
+    console.log(`📩 Notificación enviada a ${token}: ${response}`);
   } catch (error) {
     console.error(`❌ Error al enviar FCM al token ${token}: ${error.message}`);
   }
@@ -60,7 +66,13 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
       const temperatura = valores_sensores.temperatura ?? 0;
       const turbidez = valores_sensores.turbidez ?? 0;
 
-      const amonio = calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, turbidez);
+      const amonio = calcularAmonioEstimado(
+        ph,
+        temperatura,
+        oxigeno,
+        solidos_disueltos,
+        turbidez
+      );
 
       let alertas = [];
       if (oxigeno < 5 || oxigeno > 8) alertas.push(`Oxígeno fuera de rango: ${oxigeno} mg/L`);
