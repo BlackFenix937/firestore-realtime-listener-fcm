@@ -51,11 +51,13 @@ async function enviarNotificacion(token, payload) {
   }
 }
 
-// --- Listener para Firestore ---
-db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
-  snapshot.docChanges().forEach(async (change) => {
-    if (change.type === "added") {
-      const data = change.doc.data();
+// --- Listener solo para el documento más reciente ---
+db.collection("lecturas_sensores")
+  .orderBy("timestamp", "desc")
+  .limit(1)
+  .onSnapshot(async (snapshot) => {
+    snapshot.forEach(async (doc) => {
+      const data = doc.data();
       if (!data) return;
 
       const { valores_sensores, estanqueId } = data;
@@ -113,10 +115,9 @@ db.collection("lecturas_sensores").onSnapshot(async (snapshot) => {
         }
       };
 
-      // Enviar una notificación a cada token individualmente
+      // Enviar notificación a cada token uno por uno
       for (let token of tokens) {
         await enviarNotificacion(token, payload);
       }
-    }
+    });
   });
-});
