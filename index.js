@@ -34,7 +34,7 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
 
   return Math.min(Math.max(amonio, 0.0), 1.0);
 }
-
+ 
 // --- Función para enviar notificación individualmente ---
 async function enviarNotificacion(token, payload) {
   try {
