@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const express = require("express");
+const axios = require("axios");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -13,7 +14,8 @@ admin.initializeApp({
 const db = admin.firestore();
 const messaging = admin.messaging();
 
-// --- Servidor Express simple ---
+// ---------------- SERVER ----------------
+
 app.get("/", (req, res) => {
   res.send("Listener is running");
 });
@@ -22,7 +24,22 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// --- Función para calcular amonio ---
+// ----------- AUTO PING (ANTI SLEEP) -----------
+
+setInterval(async () => {
+  try {
+    const url = process.env.RENDER_EXTERNAL_URL;
+    if (url) {
+      await axios.get(url);
+      console.log("🔁 Self ping enviado para mantener activo el servidor");
+    }
+  } catch (error) {
+    console.log("Ping falló:", error.message);
+  }
+}, 300000); // 5 minutos
+
+// ----------- CALCULO AMONIO -----------
+
 function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, turbidez) {
   let amonio = 0.01;
 
@@ -35,7 +52,8 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos_disueltos, tur
   return Math.min(Math.max(amonio, 0.0), 1.0);
 }
 
-// --- Función para enviar notificación individualmente ---
+// ----------- ENVIAR NOTIFICACION -----------
+
 async function enviarNotificacion(token, payload) {
   try {
     const message = {
@@ -51,13 +69,30 @@ async function enviarNotificacion(token, payload) {
   }
 }
 
-// --- Listener solo para el documento más reciente ---
+// ----------- CONTROL DE PRIMERA EJECUCION -----------
+
+let listenerInicializado = false;
+
+// ----------- LISTENER FIRESTORE -----------
+
 db.collection("lecturas_sensores")
   .orderBy("timestamp", "desc")
   .limit(1)
   .onSnapshot(async (snapshot) => {
-    snapshot.forEach(async (doc) => {
-      const data = doc.data();
+
+    // Evita enviar notificaciones al iniciar el servidor
+    if (!listenerInicializado) {
+      listenerInicializado = true;
+      console.log("🔵 Listener iniciado. Primera lectura ignorada.");
+      return;
+    }
+
+    snapshot.docChanges().forEach(async (change) => {
+
+      // Solo cuando se agregue un nuevo documento
+      if (change.type !== "added") return;
+
+      const data = change.doc.data();
       if (!data) return;
 
       const { valores_sensores, estanqueId } = data;
@@ -77,12 +112,24 @@ db.collection("lecturas_sensores")
       );
 
       let alertas = [];
-      if (oxigeno < 5 || oxigeno > 8) alertas.push(`Oxígeno fuera de rango: ${oxigeno} mg/L`);
-      if (ph < 6.5 || ph > 7.5) alertas.push(`pH fuera de rango: ${ph}`);
-      if (temperatura < 20 || temperatura > 25) alertas.push(`Temperatura fuera de rango: ${temperatura} °C`);
-      if (solidos_disueltos > 400) alertas.push(`Sólidos disueltos muy altos: ${solidos_disueltos} ppm`);
-      if (turbidez > 400) alertas.push(`Turbidez muy alta: ${turbidez} NTU`);
-      if (amonio > 0.02) alertas.push(`Amonio elevado: ${amonio.toFixed(3)} mg/L`);
+
+      if (oxigeno < 5 || oxigeno > 8)
+        alertas.push(`Oxígeno fuera de rango: ${oxigeno} mg/L`);
+
+      if (ph < 6.5 || ph > 7.5)
+        alertas.push(`pH fuera de rango: ${ph}`);
+
+      if (temperatura < 20 || temperatura > 25)
+        alertas.push(`Temperatura fuera de rango: ${temperatura} °C`);
+
+      if (solidos_disueltos > 400)
+        alertas.push(`Sólidos disueltos muy altos: ${solidos_disueltos} ppm`);
+
+      if (turbidez > 400)
+        alertas.push(`Turbidez muy alta: ${turbidez} NTU`);
+
+      if (amonio > 0.02)
+        alertas.push(`Amonio elevado: ${amonio.toFixed(3)} mg/L`);
 
       if (alertas.length === 0) {
         console.log("✅ Valores dentro de rango, no se envía alerta.");
@@ -90,12 +137,13 @@ db.collection("lecturas_sensores")
       }
 
       const usersSnap = await db.collection("users").get();
+
       const tokens = usersSnap.docs
         .map(doc => doc.data().fcmToken)
         .filter(token => !!token);
 
       if (tokens.length === 0) {
-        console.log("⚠️ No hay tokens registrados para enviar notificaciones.");
+        console.log("⚠️ No hay tokens registrados.");
         return;
       }
 
@@ -115,9 +163,9 @@ db.collection("lecturas_sensores")
         }
       };
 
-      // Enviar notificación a cada token uno por uno
       for (let token of tokens) {
         await enviarNotificacion(token, payload);
       }
+
     });
   });
