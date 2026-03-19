@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restablecer contraseña</title>
+<link rel="stylesheet" href="reset.css">
+</head>
+
+<body>
+
+<div class="card">
+
+  <div class="logo">IOT Team</div>
+  <h2>Restablecer contraseña</h2>
+
+  <!-- PASSWORD -->
+  <div class="input-group">
+    <input type="password" id="password" placeholder="Nueva contraseña">
+    <span class="toggle" onclick="togglePass('password')">👁️</span>
+  </div>
+
+  <!-- FUERZA -->
+  <div id="strength" class="strength"></div>
+
+  <!-- CONFIRM -->
+  <div class="input-group">
+    <input type="password" id="confirm" placeholder="Confirmar contraseña">
+    <span class="toggle" onclick="togglePass('confirm')">👁️</span>
+  </div>
+
+  <button onclick="resetPassword()">Actualizar</button>
+
+  <p id="msg"></p>
+
+</div>
+
+<script src="reset.js"></script>
+
+</body>
+</html>
