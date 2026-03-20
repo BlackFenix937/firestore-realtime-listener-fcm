@@ -9,6 +9,9 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+//Para que express-rate-limit confié en render
+app.set('trust proxy', 1);
+
 app.use(express.json());
 app.use(express.static("public"));
 
