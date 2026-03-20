@@ -9,13 +9,13 @@ const rateLimit = require("express-rate-limit");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-//Para que express-rate-limit confié en render
-app.set('trust proxy', 1);
+// 🔥 IMPORTANTE PARA RENDER
+app.set("trust proxy", 1);
 
 app.use(express.json());
 app.use(express.static("public"));
 
-// 🔐 Credenciales Firebase
+// 🔐 Firebase
 const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
 admin.initializeApp({
@@ -24,33 +24,57 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 📧 Configuración correo (GMAIL)
+// =========================
+// 📧 CONFIG SMTP CORREGIDO
+// =========================
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,          // ✅ CAMBIO CLAVE
+  secure: false,      // ✅ IMPORTANTE
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD,
   },
+  tls: {
+    rejectUnauthorized: false,
+  },
 });
 
-// 🚫 Anti-spam
+// 🔍 Verificar conexión SMTP
+transporter.verify((error, success) => {
+  if (error) {
+    console.log("❌ Error SMTP:", error);
+  } else {
+    console.log("✅ SMTP listo para enviar correos");
+  }
+});
+
+// =========================
+// 🚫 RATE LIMIT
+// =========================
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// 🔑 Hash del token
+// =========================
+// 🔑 HASH TOKEN
+// =========================
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-// 🔵 Ruta base
+// =========================
+// 🔵 ROOT
+// =========================
 app.get("/", (req, res) => {
   res.send("OK");
 });
 
 // =========================
-// 📩 SOLICITAR RESET
+// 📩 REQUEST RESET
 // =========================
 app.post("/request-password-reset", limiter, async (req, res) => {
   const { email } = req.body;
@@ -68,7 +92,7 @@ app.post("/request-password-reset", limiter, async (req, res) => {
       const rawToken = crypto.randomBytes(32).toString("hex");
       const tokenHash = hashToken(rawToken);
 
-      const expireAt = Date.now() + 1000 * 60 * 15; // 15 min
+      const expireAt = Date.now() + 1000 * 60 * 15;
 
       await db.collection("password_resets").add({
         userId: userDoc.id,
@@ -83,32 +107,45 @@ app.post("/request-password-reset", limiter, async (req, res) => {
         to: email,
         subject: "Restablecer contraseña",
         html: `
-          <h3>Restablecer contraseña</h3>
-          <p>Haz clic en el siguiente enlace:</p>
-          <a href="${link}" style="padding:10px;background:#005BBB;color:white;text-decoration:none;">
+          <h2>IOT Calidad del Agua</h2>
+          <p>Haz clic en el siguiente botón para restablecer tu contraseña:</p>
+          
+          <a href="${link}" style="
+            display:inline-block;
+            padding:12px 20px;
+            background:#005BBB;
+            color:white;
+            text-decoration:none;
+            border-radius:8px;
+          ">
             Cambiar contraseña
           </a>
-          <p>Si no solicitaste esto, ignora este correo.</p>
+
+          <p style="margin-top:15px;">
+            Si no solicitaste esto, ignora este correo.
+          </p>
         `,
       });
 
-      console.log("📧 Correo enviado");
+      console.log("📧 Correo enviado a:", email);
     }
 
-    // 🔒 NO revela si existe o no
-    res.json({ message: "Si el correo existe, recibirás instrucciones." });
+    res.json({
+      message: "Si el correo existe, recibirás instrucciones.",
+    });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Error");
+    console.error("❌ ERROR RESET:", err);
+    res.status(500).send("Error interno");
   }
 });
 
 // =========================
-// 🌐 VALIDAR TOKEN Y MOSTRAR HTML
+// 🌐 VALIDAR TOKEN
 // =========================
 app.get("/reset", async (req, res) => {
   const token = req.query.token;
+
   if (!token) return res.status(403).send("No autorizado");
 
   const tokenHash = hashToken(token);
@@ -127,7 +164,7 @@ app.get("/reset", async (req, res) => {
 });
 
 // =========================
-// 🔑 CAMBIAR CONTRASEÑA
+// 🔑 CAMBIAR PASSWORD
 // =========================
 app.post("/reset-password", async (req, res) => {
   const { token, password } = req.body;
@@ -157,7 +194,6 @@ app.post("/reset-password", async (req, res) => {
       return res.status(400).send("Token expirado");
     }
 
-    // 🔐 Hash contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
     await db.collection("users").doc(data.userId).update({
@@ -165,13 +201,14 @@ app.post("/reset-password", async (req, res) => {
       lastUpdated: new Date(),
     });
 
-    // 🧨 eliminar token
     await doc.ref.delete();
+
+    console.log("🔐 Contraseña actualizada");
 
     res.json({ ok: true });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ ERROR UPDATE:", err);
     res.status(500).send("Error");
   }
 });
@@ -183,11 +220,11 @@ setInterval(async () => {
   try {
     await axios.get(process.env.RENDER_EXTERNAL_URL);
     console.log("🔁 Ping enviado");
-  } catch (e) {}
+  } catch {}
 }, 300000);
 
 // =========================
-// 🧹 LIMPIAR TOKENS EXPIRADOS
+// 🧹 LIMPIEZA TOKENS
 // =========================
 setInterval(async () => {
   const now = Date.now();
@@ -203,11 +240,11 @@ setInterval(async () => {
 
   await batch.commit();
 
-  console.log("🧹 Tokens limpiados");
+  console.log("🧹 Tokens expirados eliminados");
 
 }, 600000);
 
 // =========================
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor en puerto ${PORT}`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
