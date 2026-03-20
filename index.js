@@ -31,6 +31,7 @@ const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 587,          // ✅ CAMBIO CLAVE
   secure: false,      // ✅ IMPORTANTE
+  family: 4, //intento de forzado a IPv4
   auth: {
     user: process.env.SMTP_EMAIL,
     pass: process.env.SMTP_PASSWORD,
