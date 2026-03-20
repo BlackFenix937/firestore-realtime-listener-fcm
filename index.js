@@ -1,10 +1,10 @@
 const admin = require("firebase-admin");
 const express = require("express");
 const axios = require("axios");
-const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
+const { Resend } = require("resend");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -25,30 +25,9 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // =========================
-// 📧 CONFIG SMTP CORREGIDO
+// 📧 RESEND CONFIG
 // =========================
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,          // ✅ CAMBIO CLAVE
-  secure: true,      // ✅ IMPORTANTE
-  family: 4, //intento de forzado a IPv4
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
-
-// 🔍 Verificar conexión SMTP
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Error SMTP:", error);
-  } else {
-    console.log("✅ SMTP listo para enviar correos");
-  }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // =========================
 // 🚫 RATE LIMIT
@@ -103,14 +82,15 @@ app.post("/request-password-reset", limiter, async (req, res) => {
 
       const link = `${process.env.RENDER_EXTERNAL_URL}/reset?token=${rawToken}`;
 
-      await transporter.sendMail({
-        from: `"IOT Team" <${process.env.SMTP_EMAIL}>`,
+      // 🔥 ENVÍO CON RESEND
+      await resend.emails.send({
+        from: "IOT Team <onboarding@resend.dev>",
         to: email,
         subject: "Restablecer contraseña",
         html: `
           <h2>IOT Calidad del Agua</h2>
-          <p>Haz clic en el siguiente botón para restablecer tu contraseña:</p>
-          
+          <p>Haz clic en el botón para restablecer tu contraseña:</p>
+
           <a href="${link}" style="
             display:inline-block;
             padding:12px 20px;
@@ -123,7 +103,7 @@ app.post("/request-password-reset", limiter, async (req, res) => {
           </a>
 
           <p style="margin-top:15px;">
-            Si no solicitaste esto, ignora este correo.
+            Este enlace expirará en 15 minutos.
           </p>
         `,
       });
