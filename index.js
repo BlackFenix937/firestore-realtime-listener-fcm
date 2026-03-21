@@ -105,15 +105,43 @@ app.post("/delete-user", async (req, res) => {
   if (!uid) return res.status(400).send("UID requerido");
 
   try {
-    // 🔥 eliminar en Auth
-    await admin.auth().deleteUser(uid);
+    let deletedFromAuth = false;
 
-    // 🔥 eliminar en Firestore
+    // =========================
+    // 🔥 INTENTAR BORRAR EN AUTH
+    // =========================
+    try {
+      await admin.auth().deleteUser(uid);
+      deletedFromAuth = true;
+      console.log("🔥 Usuario eliminado de AUTH:", uid);
+    } catch (authError) {
+      if (authError.code === "auth/user-not-found") {
+        console.log(
+          "⚠️ Usuario NO estaba en AUTH, pero se eliminará de Firestore:",
+          uid
+        );
+      } else {
+        // Si es otro error real → sí lo lanzamos
+        throw authError;
+      }
+    }
+
+    // =========================
+    // 🔥 BORRAR EN FIRESTORE
+    // =========================
     await db.collection("users").doc(uid).delete();
+    console.log("🗑️ Usuario eliminado de FIRESTORE:", uid);
 
-    console.log("🗑️ Usuario eliminado:", uid);
-
-    res.json({ ok: true });
+    // =========================
+    // 🔥 RESPUESTA
+    // =========================
+    res.json({
+      ok: true,
+      authDeleted: deletedFromAuth,
+      message: deletedFromAuth
+        ? "Usuario eliminado de Auth y Firestore"
+        : "Usuario eliminado de Firestore (no existía en Auth 👀)",
+    });
 
   } catch (err) {
     console.error("❌ DELETE USER:", err);
