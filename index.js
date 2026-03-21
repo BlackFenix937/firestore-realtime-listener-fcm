@@ -54,6 +54,73 @@ app.get("/reset-success", async (req, res) => {
   }
 });
 
+app.post("/update-user", async (req, res) => {
+  const { uid, nombre, telefono, rol, email, password } = req.body;
+
+  if (!uid) return res.status(400).send("UID requerido");
+
+  try {
+    // =========================
+    // 🔥 ACTUALIZAR AUTH
+    // =========================
+    let authData = {};
+
+    if (email) authData.email = email;
+    if (password) authData.password = password;
+
+    if (Object.keys(authData).length > 0) {
+      await admin.auth().updateUser(uid, authData);
+    }
+
+    // =========================
+    // 🔐 HASH PARA FIRESTORE
+    // =========================
+    let updateData = {
+      nombre,
+      numeroTelefonico: telefono,
+      rolUser: rol,
+    };
+
+    if (email) updateData.email = email;
+
+    if (password) {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    await db.collection("users").doc(uid).update(updateData);
+
+    console.log("✏️ Usuario actualizado:", uid);
+
+    res.json({ ok: true });
+
+  } catch (err) {
+    console.error("❌ UPDATE USER:", err);
+    res.status(500).send("Error");
+  }
+});
+
+app.post("/delete-user", async (req, res) => {
+  const { uid } = req.body;
+
+  if (!uid) return res.status(400).send("UID requerido");
+
+  try {
+    // 🔥 eliminar en Auth
+    await admin.auth().deleteUser(uid);
+
+    // 🔥 eliminar en Firestore
+    await db.collection("users").doc(uid).delete();
+
+    console.log("🗑️ Usuario eliminado:", uid);
+
+    res.json({ ok: true });
+
+  } catch (err) {
+    console.error("❌ DELETE USER:", err);
+    res.status(500).send("Error");
+  }
+});
+
 // =========================
 // 🔑 CAMBIAR PASSWORD (🔥 FIRESTORE + AUTH)
 // =========================
