@@ -2,15 +2,12 @@ function getEmail() {
   return new URLSearchParams(window.location.search).get("email");
 }
 
-// 👁️ Mostrar / ocultar contraseña
 function togglePass(id) {
   const input = document.getElementById(id);
   input.type = input.type === "password" ? "text" : "password";
 }
 
-// 🔒 Validar fuerza
 function checkStrength(password) {
-
   let strengthText = "";
   let strengthClass = "";
 
@@ -30,24 +27,20 @@ function checkStrength(password) {
   el.className = "strength " + strengthClass;
 }
 
-// Detectar escritura
 document.getElementById("password").addEventListener("input", (e) => {
   checkStrength(e.target.value);
 });
 
-// 🔑 Reset
 async function resetPassword() {
-
   const password = document.getElementById("password").value;
   const confirm = document.getElementById("confirm").value;
   const msg = document.getElementById("msg");
-
   const email = getEmail();
 
   msg.innerText = "";
 
   if (!email) {
-    msg.innerText = "❌ Error: email no encontrado";
+    msg.innerText = "❌ Email inválido";
     return;
   }
 
@@ -67,7 +60,6 @@ async function resetPassword() {
   }
 
   try {
-
     msg.innerText = "⏳ Actualizando...";
 
     const res = await fetch("/reset-password", {
@@ -82,7 +74,7 @@ async function resetPassword() {
     });
 
     if (res.ok) {
-      msg.innerText = "✅ Contraseña actualizada";
+      msg.innerText = "✅ Contraseña actualizada correctamente";
     } else {
       msg.innerText = "❌ Error al actualizar";
     }

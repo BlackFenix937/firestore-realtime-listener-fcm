@@ -29,7 +29,7 @@ app.get("/", (req, res) => {
 });
 
 // =========================
-// 🌐 VALIDAR LINK FIREBASE (oobCode)
+// 🌐 VALIDAR LINK FIREBASE
 // =========================
 app.get("/reset-success", async (req, res) => {
   const { oobCode } = req.query;
@@ -39,9 +39,7 @@ app.get("/reset-success", async (req, res) => {
   try {
     const response = await axios.post(
       `https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${process.env.FIREBASE_API_KEY}`,
-      {
-        oobCode: oobCode,
-      }
+      { oobCode }
     );
 
     const email = response.data.email;
@@ -57,7 +55,7 @@ app.get("/reset-success", async (req, res) => {
 });
 
 // =========================
-// 🔑 CAMBIAR PASSWORD (Firestore)
+// 🔑 CAMBIAR PASSWORD (🔥 FIRESTORE + AUTH)
 // =========================
 app.post("/reset-password", async (req, res) => {
   const { email, password } = req.body;
@@ -78,15 +76,27 @@ app.post("/reset-password", async (req, res) => {
     }
 
     const userDoc = userSnap.docs[0];
+    const uid = userDoc.id;
 
+    // 🔐 HASH FIRESTORE
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await db.collection("users").doc(userDoc.id).update({
+    // =========================
+    // 🔥 FIRESTORE
+    // =========================
+    await userDoc.ref.update({
       password: hashedPassword,
       lastUpdated: new Date(),
     });
 
-    console.log("🔐 Password actualizado:", email);
+    // =========================
+    // 🔥 AUTH (CLAVE DEL SISTEMA)
+    // =========================
+    await admin.auth().updateUser(uid, {
+      password: password,
+    });
+
+    console.log("🔐 Password actualizado en Auth + Firestore:", email);
 
     res.json({ ok: true });
 
@@ -127,7 +137,7 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos, turbidez) {
 }
 
 // =========================
-// 🔥 LISTENER
+// 🔥 LISTENER (SIN CAMBIOS)
 // =========================
 let iniciado = false;
 
@@ -158,11 +168,7 @@ db.collection("lecturas_sensores")
       const turbidez = valores_sensores.turbidez ?? 0;
 
       const amonio = calcularAmonioEstimado(
-        ph,
-        temperatura,
-        oxigeno,
-        solidos,
-        turbidez
+        ph, temperatura, oxigeno, solidos, turbidez
       );
 
       let alertas = [];
@@ -191,7 +197,6 @@ db.collection("lecturas_sensores")
       }
 
       const usersSnap = await db.collection("users").get();
-
       const tokens = usersSnap.docs.flatMap(doc => doc.data().fcmTokens || []);
 
       if (tokens.length === 0) {
@@ -213,22 +218,18 @@ db.collection("lecturas_sensores")
           turbidez: turbidez.toString(),
           amonio: amonio.toFixed(3),
         },
-        android: {
-          priority: "high"
-        }
+        android: { priority: "high" }
       };
 
       await messaging.sendEachForMulticast({
-        tokens: tokens,
+        tokens,
         notification: payload.notification,
         data: payload.data,
         android: payload.android
       });
 
       console.log("📲 Notificaciones enviadas");
-
     });
-
   });
 
 // =========================
