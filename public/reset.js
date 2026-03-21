@@ -1,5 +1,5 @@
-function getToken() {
-  return new URLSearchParams(window.location.search).get("token");
+function getEmail() {
+  return new URLSearchParams(window.location.search).get("email");
 }
 
 // 👁️ Mostrar / ocultar contraseña
@@ -42,7 +42,14 @@ async function resetPassword() {
   const confirm = document.getElementById("confirm").value;
   const msg = document.getElementById("msg");
 
+  const email = getEmail();
+
   msg.innerText = "";
+
+  if (!email) {
+    msg.innerText = "❌ Error: email no encontrado";
+    return;
+  }
 
   if (!password || !confirm) {
     msg.innerText = "⚠️ Completa todos los campos";
@@ -50,7 +57,7 @@ async function resetPassword() {
   }
 
   if (password !== confirm) {
-    msg.innerText = "❌ Las contraseñas no coinciden";
+    msg.innerText = "❌ No coinciden";
     return;
   }
 
@@ -69,7 +76,7 @@ async function resetPassword() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        token: getToken(),
+        email: email,
         password: password
       })
     });
@@ -77,11 +84,10 @@ async function resetPassword() {
     if (res.ok) {
       msg.innerText = "✅ Contraseña actualizada";
     } else {
-      msg.innerText = "❌ Token inválido o expirado";
+      msg.innerText = "❌ Error al actualizar";
     }
 
   } catch (e) {
     msg.innerText = "❌ Error de conexión";
   }
-
 }

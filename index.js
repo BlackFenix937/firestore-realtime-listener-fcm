@@ -2,20 +2,16 @@ const admin = require("firebase-admin");
 const express = require("express");
 const axios = require("axios");
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
-const rateLimit = require("express-rate-limit");
-const { Resend } = require("resend");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// 🔥 IMPORTANTE PARA RENDER
 app.set("trust proxy", 1);
 
 app.use(express.json());
 app.use(express.static("public"));
 
-// 🔐 Firebase
+// 🔐 Firebase Admin
 const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
 admin.initializeApp({
@@ -23,41 +19,52 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
-
-// =========================
-// 📧 RESEND CONFIG
-// =========================
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-// =========================
-// 🚫 RATE LIMIT
-// =========================
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// =========================
-// 🔑 HASH TOKEN
-// =========================
-function hashToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
+const messaging = admin.messaging();
 
 // =========================
 // 🔵 ROOT
 // =========================
 app.get("/", (req, res) => {
-  res.send("OK");
+  res.send("Servidor activo 🚀");
 });
 
 // =========================
-// 📩 REQUEST RESET
+// 🌐 VALIDAR LINK FIREBASE (oobCode)
 // =========================
-app.post("/request-password-reset", limiter, async (req, res) => {
-  const { email } = req.body;
+app.get("/reset-success", async (req, res) => {
+  const { oobCode } = req.query;
+
+  if (!oobCode) return res.send("Código inválido");
+
+  try {
+    const response = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${process.env.FIREBASE_API_KEY}`,
+      {
+        oobCode: oobCode,
+      }
+    );
+
+    const email = response.data.email;
+
+    console.log("✅ Email verificado:", email);
+
+    res.redirect(`/reset.html?email=${encodeURIComponent(email)}`);
+
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.send("Código inválido o expirado");
+  }
+});
+
+// =========================
+// 🔑 CAMBIAR PASSWORD (Firestore)
+// =========================
+app.post("/reset-password", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).send("Datos inválidos");
+  }
 
   try {
     const userSnap = await db
@@ -66,130 +73,25 @@ app.post("/request-password-reset", limiter, async (req, res) => {
       .limit(1)
       .get();
 
-    if (!userSnap.empty) {
-      const userDoc = userSnap.docs[0];
-
-      const rawToken = crypto.randomBytes(32).toString("hex");
-      const tokenHash = hashToken(rawToken);
-
-      const expireAt = Date.now() + 1000 * 60 * 15;
-
-      await db.collection("password_resets").add({
-        userId: userDoc.id,
-        tokenHash,
-        expireAt,
-      });
-
-      const link = `${process.env.RENDER_EXTERNAL_URL}/reset?token=${rawToken}`;
-
-      // 🔥 ENVÍO CON RESEND
-      await resend.emails.send({
-        from: "IOT Team <onboarding@resend.dev>",
-        to: email,
-        subject: "Restablecer contraseña",
-        html: `
-          <h2>IOT Calidad del Agua</h2>
-          <p>Haz clic en el botón para restablecer tu contraseña:</p>
-
-          <a href="${link}" style="
-            display:inline-block;
-            padding:12px 20px;
-            background:#005BBB;
-            color:white;
-            text-decoration:none;
-            border-radius:8px;
-          ">
-            Cambiar contraseña
-          </a>
-
-          <p style="margin-top:15px;">
-            Este enlace expirará en 15 minutos.
-          </p>
-        `,
-      });
-
-      console.log("📧 Correo enviado a:", email);
+    if (userSnap.empty) {
+      return res.status(400).send("Usuario no encontrado");
     }
 
-    res.json({
-      message: "Si el correo existe, recibirás instrucciones.",
-    });
-
-  } catch (err) {
-    console.error("❌ ERROR RESET:", err);
-    res.status(500).send("Error interno");
-  }
-});
-
-// =========================
-// 🌐 VALIDAR TOKEN
-// =========================
-app.get("/reset", async (req, res) => {
-  const token = req.query.token;
-
-  if (!token) return res.status(403).send("No autorizado");
-
-  const tokenHash = hashToken(token);
-
-  const snap = await db
-    .collection("password_resets")
-    .where("tokenHash", "==", tokenHash)
-    .limit(1)
-    .get();
-
-  if (snap.empty) {
-    return res.status(403).send("Token inválido");
-  }
-
-  res.sendFile(__dirname + "/public/reset.html");
-});
-
-// =========================
-// 🔑 CAMBIAR PASSWORD
-// =========================
-app.post("/reset-password", async (req, res) => {
-  const { token, password } = req.body;
-
-  if (!token || !password) {
-    return res.status(400).send("Datos inválidos");
-  }
-
-  try {
-    const tokenHash = hashToken(token);
-
-    const snap = await db
-      .collection("password_resets")
-      .where("tokenHash", "==", tokenHash)
-      .limit(1)
-      .get();
-
-    if (snap.empty) {
-      return res.status(400).send("Token inválido");
-    }
-
-    const doc = snap.docs[0];
-    const data = doc.data();
-
-    if (Date.now() > data.expireAt) {
-      await doc.ref.delete();
-      return res.status(400).send("Token expirado");
-    }
+    const userDoc = userSnap.docs[0];
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await db.collection("users").doc(data.userId).update({
+    await db.collection("users").doc(userDoc.id).update({
       password: hashedPassword,
       lastUpdated: new Date(),
     });
 
-    await doc.ref.delete();
-
-    console.log("🔐 Contraseña actualizada");
+    console.log("🔐 Password actualizado:", email);
 
     res.json({ ok: true });
 
   } catch (err) {
-    console.error("❌ ERROR UPDATE:", err);
+    console.error(err);
     res.status(500).send("Error");
   }
 });
@@ -199,31 +101,135 @@ app.post("/reset-password", async (req, res) => {
 // =========================
 setInterval(async () => {
   try {
-    await axios.get(process.env.RENDER_EXTERNAL_URL);
-    console.log("🔁 Ping enviado");
-  } catch {}
+    const url = process.env.RENDER_EXTERNAL_URL;
+    if (url) {
+      await axios.get(url);
+      console.log("🔁 Ping enviado");
+    }
+  } catch (error) {
+    console.log("Ping error:", error.message);
+  }
 }, 300000);
 
 // =========================
-// 🧹 LIMPIEZA TOKENS
+// 🧠 FUNCIÓN AMONIO
 // =========================
-setInterval(async () => {
-  const now = Date.now();
+function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos, turbidez) {
+  let amonio = 0.01;
 
-  const snap = await db
-    .collection("password_resets")
-    .where("expireAt", "<", now)
-    .get();
+  if (ph > 7.5) amonio += 0.005 * (ph - 7.5);
+  if (temperatura > 25) amonio += 0.003 * (temperatura - 25);
+  if (oxigeno < 5) amonio += 0.005 * (5 - oxigeno);
+  if (solidos > 300) amonio += 0.002 * ((solidos - 300) / 100);
+  if (turbidez > 10) amonio += 0.001 * (turbidez - 10);
 
-  const batch = db.batch();
+  return Math.min(Math.max(amonio, 0), 1);
+}
 
-  snap.forEach(doc => batch.delete(doc.ref));
+// =========================
+// 🔥 LISTENER
+// =========================
+let iniciado = false;
 
-  await batch.commit();
+db.collection("lecturas_sensores")
+  .orderBy("timestamp", "desc")
+  .limit(1)
+  .onSnapshot(async (snapshot) => {
 
-  console.log("🧹 Tokens expirados eliminados");
+    if (!iniciado) {
+      iniciado = true;
+      console.log("👂 Listener iniciado");
+      return;
+    }
 
-}, 600000);
+    snapshot.docChanges().forEach(async (change) => {
+
+      if (change.type !== "added") return;
+
+      const data = change.doc.data();
+      if (!data) return;
+
+      const { valores_sensores, estanqueId } = data;
+
+      const oxigeno = valores_sensores.oxigeno ?? 0;
+      const ph = valores_sensores.ph ?? 0;
+      const solidos = valores_sensores.solidos_disueltos ?? 0;
+      const temperatura = valores_sensores.temperatura ?? 0;
+      const turbidez = valores_sensores.turbidez ?? 0;
+
+      const amonio = calcularAmonioEstimado(
+        ph,
+        temperatura,
+        oxigeno,
+        solidos,
+        turbidez
+      );
+
+      let alertas = [];
+
+      if (oxigeno < 5 || oxigeno > 8)
+        alertas.push(`Oxígeno fuera de rango: ${oxigeno}`);
+
+      if (ph < 6.5 || ph > 7.5)
+        alertas.push(`pH fuera de rango: ${ph}`);
+
+      if (temperatura < 20 || temperatura > 25)
+        alertas.push(`Temperatura fuera de rango: ${temperatura}`);
+
+      if (solidos > 400)
+        alertas.push(`Sólidos altos: ${solidos}`);
+
+      if (turbidez > 400)
+        alertas.push(`Turbidez alta: ${turbidez}`);
+
+      if (amonio > 0.02)
+        alertas.push(`Amonio elevado: ${amonio.toFixed(3)}`);
+
+      if (alertas.length === 0) {
+        console.log("Valores normales");
+        return;
+      }
+
+      const usersSnap = await db.collection("users").get();
+
+      const tokens = usersSnap.docs.flatMap(doc => doc.data().fcmTokens || []);
+
+      if (tokens.length === 0) {
+        console.log("No hay tokens");
+        return;
+      }
+
+      const payload = {
+        notification: {
+          title: `⚠️ Alerta en ${estanqueId}`,
+          body: alertas.join(" | "),
+        },
+        data: {
+          estanqueId: estanqueId,
+          oxigeno: oxigeno.toString(),
+          ph: ph.toString(),
+          temperatura: temperatura.toString(),
+          solidos: solidos.toString(),
+          turbidez: turbidez.toString(),
+          amonio: amonio.toFixed(3),
+        },
+        android: {
+          priority: "high"
+        }
+      };
+
+      await messaging.sendEachForMulticast({
+        tokens: tokens,
+        notification: payload.notification,
+        data: payload.data,
+        android: payload.android
+      });
+
+      console.log("📲 Notificaciones enviadas");
+
+    });
+
+  });
 
 // =========================
 app.listen(PORT, () => {
