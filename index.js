@@ -28,83 +28,6 @@ app.get("/", (req, res) => {
   res.send("Servidor activo 🚀");
 });
 
-// =========================
-// 🌐 VALIDAR LINK FIREBASE
-// =========================
-app.get("/reset-success", async (req, res) => {
-  const { oobCode } = req.query;
-
-  if (!oobCode) return res.send("Código inválido");
-
-  try {
-    const response = await axios.post(
-      `https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${process.env.FIREBASE_API_KEY}`,
-      { oobCode }
-    );
-
-    const email = response.data.email;
-
-    console.log("✅ Email verificado:", email);
-
-    res.redirect(`/reset.html?email=${encodeURIComponent(email)}`);
-
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.send("Código inválido o expirado");
-  }
-});
-
-// =========================
-// 🔑 CAMBIAR PASSWORD (🔥 FIRESTORE + AUTH)
-// =========================
-app.post("/reset-password", async (req, res) => {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).send("Datos inválidos");
-  }
-
-  try {
-    const userSnap = await db
-      .collection("users")
-      .where("email", "==", email)
-      .limit(1)
-      .get();
-
-    if (userSnap.empty) {
-      return res.status(400).send("Usuario no encontrado");
-    }
-
-    const userDoc = userSnap.docs[0];
-    const uid = userDoc.id;
-
-    // 🔐 HASH FIRESTORE
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // =========================
-    // 🔥 FIRESTORE
-    // =========================
-    await userDoc.ref.update({
-      password: hashedPassword,
-      lastUpdated: new Date(),
-    });
-
-    // =========================
-    // 🔥 AUTH (CLAVE DEL SISTEMA)
-    // =========================
-    await admin.auth().updateUser(uid, {
-      password: password,
-    });
-
-    console.log("🔐 Password actualizado en Auth + Firestore:", email);
-
-    res.json({ ok: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Error");
-  }
-});
 
 // =========================
 // 🔁 KEEP ALIVE
@@ -137,7 +60,7 @@ function calcularAmonioEstimado(ph, temperatura, oxigeno, solidos, turbidez) {
 }
 
 // =========================
-// 🔥 LISTENER (SIN CAMBIOS)
+// 🔥 LISTENER
 // =========================
 let iniciado = false;
 
